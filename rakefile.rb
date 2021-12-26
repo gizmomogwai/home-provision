@@ -26,14 +26,36 @@ def exe(ctx, command)
   ctx.execute(command, interaction_handler: AllOutputInteractionHandler.new)
 end
 
-def upload(ctx, file, destination, user, group, mask)
+def upload(ctx, file, destination, user, group, mask, sudo=false)
   if ctx.test("[ -f #{destination} ]")
-    remote_checksum = ctx.capture("sha512sum #{destination}").split(" ").first
+    remote_checksum = ctx.capture("#{sudo ? 'sudo ':''}sha512sum #{destination}").split(" ").first
     local_checksum = `sha512sum #{file}`.strip.split(" ").first
-    return false if remote_checksum == local_checksum
+    if remote_checksum == local_checksum
+      ctx.info("#{destination} is already up2date")
+      return false
+    end
   end
+
   ctx.upload!(file, "tmp/")
   exe(ctx, "sudo mv tmp/#{File.basename(file)} #{destination}")
+  exe(ctx, "sudo chown #{user}:#{group} #{destination}")
+  exe(ctx, "sudo chmod #{mask} #{destination}")
+  return true
+end
+
+def upload_encrypted_file(ctx, file, destination, user, group, mask, sudo=false)
+  decrypted = `gpg --decrypt --quiet #{file}`
+  if ctx.test("[ -f #{destination} ]")
+    remote_checksum = ctx.capture("#{sudo ? 'sudo ':''}sha512sum #{destination}").split(" ").first
+    local_checksum = `gpg --decrypt --quiet #{file} | sha512sum`.strip.split(" ").first
+    if remote_checksum == local_checksum
+      info("#{destination} is already up2date")
+      return false
+    end
+  end
+
+  ctx.upload!(StringIO.new(decrypted), "tmp/tmp")
+  exe(ctx, "sudo mv tmp/tmp #{destination}")
   exe(ctx, "sudo chown #{user}:#{group} #{destination}")
   exe(ctx, "sudo chmod #{mask} #{destination}")
   return true
@@ -76,16 +98,17 @@ class Service
     exe(@ctx, "sudo systemctl enable #{@name}")
   end
   def enabled?
-    output = @ctx.capture("systemctl status #{@name}")
-    match = output.match(Regexp.new(".*Loaded: .*?; (.*?);.*", Regexp::MULTILINE))
-    return match[1] == "enabled"
+    output = @ctx.capture("systemctl is-enabled #{@name}").strip
+    return output == "enabled"
   end
 end
+
 on servers.with_role(:torrent).in(:munich) do |host|
   info("Installing openvpn + deluge in namespace on #{host}")
-  exe(self, "ls -la /lib/systemd/system/open*")
-  exe(self, 'sudo find /lib/systemd -name "*~" -delete')
   Service.new(self, "openvpn-in-namespace-client@italy", "openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service").install
+  upload_encrypted_file(self, "openvpn-in-namespace-client@italy/pia.pass.gpg", "/etc/openvpn/client/pia.pass", "root", "root", "400", true)
+  upload_encrypted_file(self, "openvpn-in-namespace-client@italy/italy.conf.gpg", "/etc/openvpn/client/italy.conf", "root", "root", "400", true)
+  upload(self, "openvpn-in-namespace-client@italy/up.sh", "/etc/openvpn/client/up.sh", "root", "root", "700", true)
 end
 
 task :default

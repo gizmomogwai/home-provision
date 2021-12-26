@@ -1,5 +1,7 @@
-* TODO add vpn config
+#+TODO: TODO IN-PROGRESS | DONE
+
+* IN-PROGRESS add openvpn up down scripts
 * TODO add installation of openvpn
 * TODO add installation of openvpn in namespace
-* TODO add openvpn up down scripts
+* TODO add vpn config
 
