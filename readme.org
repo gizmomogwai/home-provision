@@ -12,6 +12,6 @@
   https://github.com/slingamn/namespaced-openvpn
   https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn
 * DONE run all tasks for a location
-* TODO add installation of openvpn
-  CLOSED: [2021-12-28 Tue 22:03]
+* DONE add installation of openvpn
+  CLOSED: [2021-12-28 Tue 22:12]
   - CLOSING NOTE [2021-12-28 Tue 22:03]

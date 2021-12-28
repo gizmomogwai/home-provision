@@ -64,6 +64,14 @@ def upload(ctx, file, destination, user, group, mask, sudo=false)
   return true
 end
 
+def install_apt(ctx, packagename)
+  if ctx.test("apt list --installed #{packagename} | grep #{packagename}")
+    info("#{packagename} is already installed")
+    return false
+  end
+  exe(ctx, "sudo apt install #{packagename}")
+  return true
+end
 def upload_encrypted_file(ctx, file, destination, user, group, mask, sudo=false)
   decrypted = `gpg --decrypt --quiet #{file}`
   if ctx.test("[ -f #{destination} ]")
@@ -141,6 +149,7 @@ locations.each do |location|
       on servers.with_role(:torrent).in(location) do |host|
         info("Installing openvpn + deluge in namespace on #{host}")
 
+        install_apt(self, "openvpn")
         install_from_web(self, "https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn", "/usr/local/bin/namespaced-openvpn")
         Service.new(self, "openvpn-in-namespace-client@italy", "openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service").install
 
