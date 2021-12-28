@@ -1,7 +1,17 @@
 #+TODO: TODO IN-PROGRESS | DONE
 
-* IN-PROGRESS add openvpn up down scripts
+* DONE add openvpn up script
+  CLOSED: [2021-12-26 Sun 20:27]
+  - CLOSING NOTE [2021-12-26 Sun 20:27]
+* DONE add vpn config
+  CLOSED: [2021-12-26 Sun 20:28]
+  - CLOSING NOTE [2021-12-26 Sun 20:28]
+* DONE add installation of openvpn in namespace
+  CLOSED: [2021-12-28 Tue 22:03]
+  - CLOSING NOTE [2021-12-28 Tue 22:03]
+  https://github.com/slingamn/namespaced-openvpn
+  https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn
+* DONE run all tasks for a location
 * TODO add installation of openvpn
-* TODO add installation of openvpn in namespace
-* TODO add vpn config
-
+  CLOSED: [2021-12-28 Tue 22:03]
+  - CLOSING NOTE [2021-12-28 Tue 22:03]
