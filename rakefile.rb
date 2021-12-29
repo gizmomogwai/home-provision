@@ -13,6 +13,7 @@ servers = [
   server("fs.local", [:torrent, :apt], :munich),
   server("slideshow.local", [:slideshow, :apt], :munich),
   server("seehaus-piano.local", [:torrent, :apt], :seehaus),
+  server("gizmomogwai-cloud001", [:apt], :cloud),
 ]
 class Array
   def with_role(role)
@@ -136,6 +137,7 @@ locations =
   [
     :munich,
     :seehaus,
+    :cloud,
   ]
 
 locations.each do |location|
@@ -151,7 +153,9 @@ locations.each do |location|
 
         install_apt(self, "openvpn")
         install_from_web(self, "https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn", "/usr/local/bin/namespaced-openvpn")
-        Service.new(self, "openvpn-in-namespace-client@italy", "openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service").install
+        Service
+          .new(self, "openvpn-in-namespace-client@italy", "openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service")
+          .install
 
         info("Installing custom openvpn config and scripts on #{host}")
         upload_encrypted_file(self, "openvpn-in-namespace-client@italy/pia.pass.gpg", "/etc/openvpn/client/pia.pass", "root", "root", "400", true)
@@ -165,9 +169,9 @@ locations.each do |location|
     t = task :update do
       on servers.with_role(:apt).in(location) do |host|
         info("Updating #{host}")
-        exe(self, "apt update", true)
-        exe(self, "apt dist-upgrade", true)
-        exe(self, "apt autoremove", true)
+        exe(self, "DEBIAN_FRONTEND=noninteractive apt-get --yes update", true)
+        exe(self, "DEBIAN_FRONTEND=noninteractive apt-get --yes dist-upgrade", true)
+        exe(self, "DEBIAN_FRONTEND=noninteractive apt-get --yes autoremove", true)
       end
     end
     all.enhance([t])
