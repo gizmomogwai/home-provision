@@ -42,7 +42,7 @@ def install_from_web(ctx, url, destination)
       return false
     end
   end
-  exe(ctx, "curl --silent --output #{destination} #{url}")
+  exe(ctx, "sudo curl --silent --output #{destination} #{url}")
   exe(ctx, "sudo chown root:root #{destination}")
   exe(ctx, "sudo chmod 766 #{destination}")
   return true
@@ -128,7 +128,7 @@ class Service
     exe(@ctx, "sudo systemctl enable #{@name}")
   end
   def enabled?
-    output = @ctx.capture("systemctl is-enabled #{@name}").strip
+    output = @ctx.capture("systemctl is-enabled #{@name}", raise_on_non_zero_exit: false)
     return output == "enabled"
   end
 end
