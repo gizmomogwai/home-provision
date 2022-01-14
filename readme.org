@@ -17,5 +17,21 @@
   - CLOSING NOTE [2021-12-28 Tue 22:03]
 
 * IN-PROGRESS install apache with webdav
-* TODO vcgencmd get_throttled
+* IN-PROGRESS vcgencmd get_throttled
+* TODO cat /proc/device-tree/model
 
+* TODO update slideshow machine in munich
+** TODO wpa_supplicant.conf on boot
+  https://howchoo.com/g/ndy1zte2yjn/how-to-set-up-wifi-on-your-raspberry-pi-without-ethernet
+ctrl_interface=DIR=/var/run/wpa_supplicant GROUP=netdev
+update_config=1
+country=DE
+network={
+	ssid="Pepe"
+	psk="l1ghtv1ew"
+}
+
+** TODO enable ssh on boot
+   https://phoenixnap.com/kb/enable-ssh-raspberry-pi
+   touch /Volumes/boot/ssh
+   
