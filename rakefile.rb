@@ -33,7 +33,15 @@ class Package
     end
   end
 end
-
+class ConfigFile
+  def initialize(destination, source)
+    @destination = destination
+    @source = source
+  end
+  def install(ctx)
+    upload_encrypted_file(ctx, @source, @destination, "root", "root", "400", :sudo)
+  end
+end
 class Tarball
   def initialize(name, url, destination, commands)
     @name = name
@@ -52,6 +60,32 @@ class Tarball
     exe(ctx, "rm #{tmp_file}")
   end
 end
+
+class Git
+  def initialize(name, url, destination, commands)
+    @name = name
+    @url = url
+    @destination = destination
+    @commands = commands
+    @force = false
+  end
+  def force
+    @force = true
+    return self
+  end
+  def install(ctx)
+    unless @force
+      return if ctx.test("[ -f #{@destination} ]")
+    end
+
+    exe(ctx, "git clone #{@url} || true")
+    exe(ctx, "cd #{@name} && git fetch origin && git rebase origin/master")
+    @commands.each do |command|
+      exe(ctx, command.gsub('#{file}', @name))
+    end
+  end
+end
+
 def torrent_packages
   return [
     Package.new("openvpn"),
@@ -59,6 +93,7 @@ def torrent_packages
     Package.new("aria2"),
   ]
 end
+
 
 def sdrip_packages
   return [
@@ -94,29 +129,60 @@ def slideshow_packages
                 "https://download.bell-sw.com/java/17.0.1+12/bellsoft-jdk17.0.1+12-linux-arm32-vfp-hflt.tar.gz",
                 "/home/pi/bin/jdk",
                 [
+                  "mkdir -p ~/bin",
                   'tar xvf #{file} --one-top-level=~/bin',
-                  "ln -s /home/pi/bin/jdk-17.0.1 /home/pi/bin/jdk",
+                  "rm -f ~/bin/jdk",
+                  "ln -s ~/bin/jdk-17.0.1 ~/bin/jdk",
                 ]),
   ]
 end
 
+def slideshow_server_packages
+  return [
+    Package.new("syncthing", ["systemctl --user enable syncthing", "systemctl --user start syncthing"]),
+  ]
+end
+
+def no_ip_packages
+  return [
+    Package.new("autoconf"),
+    Package.new("libconfuse-dev"),
+    Package.new("gnutls-dev"),
+    Git.new("inadyn",
+            "https://github.com/troglobit/inadyn.git",
+            "/sbin/inadyn",
+            [
+              "cd inadyn && autoreconf -iv && ./configure --with-systemd=/etc/systemd/system && make -j && sudo make install",
+              "sudo systemctl enable inadyn.service",
+              "sudo systemctl start inadyn.service",
+            ]),
+  ]
+end
+
 servers = [
-  server("fs.local", [:torrent, :apt, :pi, :slideshow_server], :munich, {
-           packages: debian_packages,
+  server("fs.local", [:torrent, :apt, :pi, :slideshow_server, :no_ip], :munich, {
+           packages: debian_packages +
+             slideshow_server_packages +
+             [ConfigFile.new("/usr/local/etc/inadyn.conf", "inadyn.conf.gpg.munich")] +
+             no_ip_packages,
          }),
   server("slideshow.local", [:slideshow, :apt, :pi, :wifi], :munich, {
            packages: debian_packages +
              wifi_packages +
              slideshow_packages,
          }),
-  server("seehaus-piano.local", [:torrent, :apt, :sdrip, :pi, :wifi], :seehaus, {
+  server("seehaus-piano.local", [:torrent, :apt, :sdrip, :pi, :wifi, :slideshow_server, :no_ip], :seehaus, {
            packages: debian_packages +
              torrent_packages +
              sdrip_packages +
-             wifi_packages,
+             wifi_packages +
+             slideshow_server_packages +
+             [ConfigFile.new("/usr/local/etc/inadyn.conf", "inadyn.conf.gpg.seehausen")] +
+             no_ip_packages,
          }),
-  server("seehaus-blau.local", [:pi], :seehaus, {
+  server("seehaus-blau.local", [:pi, :api, :wifi, :slideshow], :seehaus, {
            packages: debian_packages +
+             wifi_packages +
              slideshow_packages,
          }),
   server("gizmomogwai-cloud001", [:apt], :cloud),
@@ -200,21 +266,24 @@ def upload(ctx, file, destination, user, group, mask, *options)
   return true
 end
 
-def upload_encrypted_file(ctx, file, destination, user, group, mask, sudo=false)
+def upload_encrypted_file(ctx, file, destination, user, group, mask, *options)
   decrypted = `gpg --decrypt --quiet #{file}`
+  raise "Cannot execute gpg" unless $?.exitstatus == 0
+
   if ctx.test("[ -f #{destination} ]")
-    remote_checksum = ctx.capture("#{with_sudo(sudo)}sha512sum #{destination}").split(" ").first
+    remote_checksum = ctx.capture("#{with_sudo(options)}sha512sum #{destination}").split(" ").first
     local_checksum = `gpg --decrypt --quiet #{file} | sha512sum`.strip.split(" ").first
     if remote_checksum == local_checksum
-      info("#{destination} is already up2date")
+      ctx.info("#{destination} is already up2date")
       return false
     end
   end
 
   ctx.upload!(StringIO.new(decrypted), "tmp/tmp")
-  exe(ctx, "mv tmp/tmp #{destination}", :sudo)
-  exe(ctx, "chown #{user}:#{group} #{destination}", :sudo)
-  exe(ctx, "chmod #{mask} #{destination}", :sudo)
+  exe(ctx, "mkdir -p #{File.dirname(destination)}", *options)
+  exe(ctx, "mv tmp/tmp #{destination}", *options)
+  exe(ctx, "chown #{user}:#{group} #{destination}", *options)
+  exe(ctx, "chmod #{mask} #{destination}", *options)
   return true
 end
 
@@ -335,8 +404,8 @@ locations.each do |location|
         end
         install_from_web(self, "https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn", "/usr/local/bin/namespaced-openvpn")
         info("Installing custom openvpn config and scripts on #{host}")
-        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/pia.pass.gpg", "/etc/openvpn/client/pia.pass", "root", "root", "400", true)
-        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/italy.conf.gpg", "/etc/openvpn/client/italy.conf", "root", "root", "400", true)
+        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/pia.pass.gpg", "/etc/openvpn/client/pia.pass", "root", "root", "400", :sudo)
+        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/italy.conf.gpg", "/etc/openvpn/client/italy.conf", "root", "root", "400", :sudo)
         Service.new(self, "openvpn-in-namespace-client@italy", "torrent/openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service")
           .install
         upload(self, "torrent/000-default.conf", "/etc/apache2/sites-available/000-default.conf", "root", "root", "644", :sudo)
@@ -361,7 +430,7 @@ locations.each do |location|
           upload(self, file, "/home/pi/#{file}", "pi", "pi", "400")
         end
         upload(self, "sdrip/out/main/raspi/sdrip", "/home/pi/sdrip/sdrip", "pi", "pi", "700")
-        upload(self, "sdrip/source/deployment/sites/#{host.hostname}/settings.yaml", "/home/pi/sdrip/settings.yaml", "pi", "pi", "400")
+        upload(self, "sdrip/source/deployment/sites/#{host.hostname}/settings.yaml", "/home/pi/sdrip/settings.yaml", "pi", "pi", "400") # TODO encrypt
       end
     end
     all.enhance([t])
@@ -439,9 +508,11 @@ servers.with_role(:slideshow).each do |host|
       raise "Please link slideshow to project folder" unless File.exist?("slideshow")
       raise "Please build slideshow" unless File.exist?("slideshow/build/libs/slideshow-all.jar")
 
-      upload(self, "slideshow/build/libs/slideshow-all.jar", "/home/pi/slideshow-all.jar", "pi", "pi", "600")
-      exe(self, "touch /home/pi/slideshow-all.jar-updated");
-      upload(self, "slideshow/src/deployment/.config/slideshow/#{host.hostname}.properties", "/home/pi/.config/slideshow/slideshow.properties", "pi", "pi", "600")
+      changed = upload(self, "slideshow/build/libs/slideshow-all.jar", "/home/pi/slideshow-all.jar", "pi", "pi", "600")
+      if changed
+        exe(self, "touch /home/pi/slideshow-all.jar-updated")
+      end
+      upload_encrypted_file(self, "slideshow/src/deployment/.config/slideshow/#{host.hostname}.properties.gpg", "/home/pi/.config/slideshow/slideshow.properties", "pi", "pi", "600")
       upload(self, "slideshow/src/deployment/.config/awesome/#{host.hostname}.rc.lua", "/home/pi/.config/awesome/rc.lua", "pi", "pi", "600")
 
       MountService.new(self, "home-pi-Slideshow.mount", "slideshow/src/deployment/etc/systemd/system/home-pi-Slideshow.mount",
@@ -457,5 +528,23 @@ servers.with_role(:slideshow).each do |host|
     end
   end
 end
+
+
+servers.each do |server|
+  namespace server.hostname do
+    desc "Install packages"
+    task :install_packages do
+      on server do
+        ctx = self
+        server.properties.packages.each do |p|
+          p.install(ctx)
+        end
+      end
+    end
+  end
+
+end
+
+
 
 task :default
