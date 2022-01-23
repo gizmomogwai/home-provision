@@ -5,6 +5,7 @@ include SSHKit::DSL
 SSHKit::Backend::Netssh.pool.idle_timeout = 0
 SSHKit.config.output_verbosity = Logger::DEBUG
 
+
 def server(host_name, roles, location, hash = {})
   result = SSHKit::Host.new(host_name)
   result.properties.roles = roles
@@ -15,147 +16,41 @@ def server(host_name, roles, location, hash = {})
   return result
 end
 
-# wrapper around apt packages
-class Package
-  def initialize(name, post_install=[])
-    @name = name
-    @post_install = post_install
-  end
-  def install(ctx)
-    if ctx.test("dpkg --get-selections #{@name} | grep install")
-      ctx.info("Package #{@name} is already installed")
-      return
-    end
-
-    exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes install #{@name}", :sudo)
-    @post_install.each do |command|
-      exe(ctx, command, :sudo)
-    end
-  end
-end
-class ConfigFile
-  def initialize(destination, source)
-    @destination = destination
-    @source = source
-  end
-  def install(ctx)
-    upload_encrypted_file(ctx, @source, @destination, "root", "root", "400", :sudo)
-  end
-end
-class Tarball
-  def initialize(name, url, destination, commands)
-    @name = name
-    @url = url
-    @destination = destination
-    @commands = commands
-  end
-  def install(ctx)
-    return if ctx.test("[ -f #{@destination} ]")
-
-    tmp_file = Time.now.to_i.to_s
-    exe(ctx, "curl --silent --show-error #{@url} > #{tmp_file}")
-    @commands.each do |command|
-      exe(ctx, command.gsub('#{file}', tmp_file))
-    end
-    exe(ctx, "rm #{tmp_file}")
-  end
-end
-
-class Git
-  def initialize(name, url, destination, commands)
-    @name = name
-    @url = url
-    @destination = destination
-    @commands = commands
-    @force = false
-  end
-  def force
-    @force = true
-    return self
-  end
-  def install(ctx)
-    unless @force
-      return if ctx.test("[ -f #{@destination} ]")
-    end
-
-    exe(ctx, "git clone #{@url} || true")
-    exe(ctx, "cd #{@name} && git fetch origin && git rebase origin/master")
-    @commands.each do |command|
-      exe(ctx, command.gsub('#{file}', @name))
-    end
-  end
-end
-
 def torrent_packages
   return [
-    Package.new("openvpn"),
-    Package.new("apache2"),
-    Package.new("aria2"),
-  ]
-end
-
-
-def sdrip_packages
-  return [
-    Package.new("avahi-utils"),
+    "openvpn",
+    "apache2",
+    "aria2",
   ]
 end
 
 def debian_packages
   return [
-    Package.new("etckeeper"),
-    Package.new("joe"),
-    Package.new("emacs"),
-    Package.new("apt-file", ["apt-file update"]),
-    Package.new("tig"),
-    Package.new("byobu"),
-    Package.new("fish"),
+    "etckeeper",
+    "joe",
+    "emacs",
+    "apt-file",
+    "tig",
+    "byobu",
+    "fish",
   ]
 end
 
 def wifi_packages
   return [
-    Package.new("wavemon"),
+    "wavemon"
   ]
 end
 
 def slideshow_packages
   return [
-    Package.new("lightdm"),
-    Package.new("awesome"),
-    Package.new("unclutter"),
-    Package.new("davfs2"),
-    Tarball.new("openjdk",
-                "https://download.bell-sw.com/java/17.0.1+12/bellsoft-jdk17.0.1+12-linux-arm32-vfp-hflt.tar.gz",
-                "/home/pi/bin/jdk",
-                [
-                  "mkdir -p ~/bin",
-                  'tar xvf #{file} --one-top-level=~/bin',
-                  "rm -f ~/bin/jdk",
-                  "ln -s ~/bin/jdk-17.0.1 ~/bin/jdk",
-                ]),
+    "slideshow",
   ]
 end
 
 def slideshow_server_packages
   return [
-    Package.new("syncthing", ["systemctl --user enable syncthing", "systemctl --user start syncthing"]),
-  ]
-end
-
-def no_ip_packages
-  return [
-    Package.new("autoconf"),
-    Package.new("libconfuse-dev"),
-    Package.new("gnutls-dev"),
-    Git.new("inadyn",
-            "https://github.com/troglobit/inadyn.git",
-            "/sbin/inadyn",
-            [
-              "cd inadyn && autoreconf -iv && ./configure --with-systemd=/etc/systemd/system && make -j && sudo make install",
-              "sudo systemctl enable inadyn.service",
-              "sudo systemctl start inadyn.service",
-            ]),
+    "syncthing",
   ]
 end
 
@@ -163,30 +58,269 @@ servers = [
   server("fs.local", [:torrent, :apt, :pi, :slideshow_server, :no_ip], :munich, {
            packages: debian_packages +
              slideshow_server_packages +
-             [ConfigFile.new("/usr/local/etc/inadyn.conf", "inadyn.conf.gpg.munich")] +
-             no_ip_packages,
+             ["inadyn-config"]
          }),
   server("slideshow.local", [:slideshow, :apt, :pi, :wifi], :munich, {
            packages: debian_packages +
              wifi_packages +
              slideshow_packages,
          }),
-  server("seehaus-piano.local", [:torrent, :apt, :sdrip, :pi, :wifi, :slideshow_server, :no_ip], :seehaus, {
-           packages: debian_packages +
+  server("seehaus-piano.local", [:torrent, :apt, :sdrip, :pi, :wifi, :slideshow_server, :no_ip], :seehausen, {
+           packages:
+             ["apt-dist-upgrade"] +
+             debian_packages +
              torrent_packages +
-             sdrip_packages +
              wifi_packages +
-             slideshow_server_packages +
-             [ConfigFile.new("/usr/local/etc/inadyn.conf", "inadyn.conf.gpg.seehausen")] +
-             no_ip_packages,
+             [
+               "inadyn-config",
+               "sdrip",
+             ] +
+             slideshow_server_packages
          }),
-  server("seehaus-blau.local", [:pi, :api, :wifi, :slideshow], :seehaus, {
+  server("seehaus-blau.local", [:pi, :apt, :wifi, :slideshow], :seehausen, {
            packages: debian_packages +
              wifi_packages +
              slideshow_packages,
          }),
   server("gizmomogwai-cloud001", [:apt], :cloud),
 ]
+
+
+
+class Registry
+  attr_reader :packages
+  def initialize
+    @packages = {}
+  end
+  def add(package)
+    raise "Package '#{package.name}' already registered" if @packages.include?(package.name)
+    @packages[package.name] = package
+    return self
+  end
+  def install(ctx, name)
+    raise "Cannot find package '#{name}'" unless @packages.include?(name)
+
+    @packages[name].install(self, ctx)
+  end
+end
+REGISTRY = Registry.new
+
+# wrapper around apt packages
+class Package
+  attr_reader :name, :dependencies, :post_install_commands
+  def initialize(name, dependencies: [], post_install_commands: [])
+    @name = name
+    @dependencies = dependencies
+    @post_install_commands = post_install_commands
+  end
+  def install_dependencies(registry, ctx)
+    @dependencies.each do |dependency|
+      registry.install(ctx, dependency)
+    end
+  end
+
+  def install(registry, ctx)
+    puts "Install package #{@name}"
+    install_dependencies(registry, ctx)
+
+    if ctx.test("dpkg --get-selections #{@name} | grep install")
+      ctx.info("Package #{@name} is already installed")
+      return
+    end
+
+    exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes install #{@name}", :sudo)
+    @post_install_commands.each do |command|
+      exe(ctx, command, :sudo)
+    end
+  end
+end
+
+class AptDistUpgrade < Package
+  def initialize()
+    super("apt-dist-upgrade")
+  end
+  def install(registry, ctx)
+    ctx.info("Updating #{ctx.host}")
+    exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes update", :sudo)
+    exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes dist-upgrade", :sudo)
+    exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes autoremove", :sudo)
+  end
+end
+
+class ConfigFile < Package
+  def initialize(name, destination, source, dependencies: [])
+    super(name, dependencies: dependencies)
+    @destination = destination
+    @source = source
+  end
+  def install(registry, ctx)
+    source = @source.gsub('#{location}', ctx.host.properties.location.to_s)
+    upload_encrypted_file(ctx, source, @destination, "root", "root", "400", :sudo)
+  end
+end
+
+class Tarball < Package
+  def initialize(name, url, destination, dependencies: [], post_install_commands: [], test: "-f")
+    super(name, dependencies: dependencies, post_install_commands: post_install_commands)
+    @url = url
+    @destination = destination
+    @test = test
+  end
+  def install(registry, ctx)
+    install_dependencies(registry, ctx)
+
+    return if ctx.test("[ #{@test} #{@destination} ]")
+
+    tmp_file = Time.now.to_i.to_s
+    exe(ctx, "curl --silent --show-error #{@url} > #{tmp_file}")
+    @post_install_commands.each do |command|
+      exe(ctx, command.gsub('#{file}', tmp_file))
+    end
+    exe(ctx, "rm #{tmp_file}")
+  end
+end
+
+class Git < Package
+  def initialize(name, url, destination, dependencies:[], post_install_commands:[])
+    super(name,
+          dependencies: dependencies,
+          post_install_commands: post_install_commands)
+    @url = url
+    @destination = destination
+    @force = false
+  end
+  def force
+    @force = true
+    return self
+  end
+  def install(registry, ctx)
+    install_dependencies(registry, ctx)
+
+    unless @force
+      return if ctx.test("[ -f #{@destination} ]")
+    end
+
+    exe(ctx, "git clone #{@url} || true")
+    exe(ctx, "cd #{@name} && git fetch origin && git rebase origin/master")
+    @post_install_commands.each do |command|
+      exe(ctx, command.gsub('#{file}', @name))
+    end
+  end
+end
+
+class SDRip < Package
+  def initialize()
+    super("sdrip", dependencies: ["avahi-utils"])
+  end
+
+  def install(registry, ctx)
+    raise "Please link sdrip project folder" unless File.exist?("sdrip")
+    raise "Please compile sdrip" unless File.exist?("sdrip/out/main/raspi/sdrip")
+    Service.new(ctx, "sdrip", "sdrip/source/deployment/systemd/sdrip.service")
+      .install_for_user
+    Dir.glob("sdrip/public/*").each do |file|
+      upload(ctx, file, "/home/pi/#{file}", "pi", "pi", "400")
+    end
+    upload(ctx, "sdrip/out/main/raspi/sdrip", "/home/pi/sdrip/sdrip", "pi", "pi", "700")
+    upload(ctx, "sdrip/source/deployment/sites/#{ctx.host.hostname}/settings.yaml", "/home/pi/sdrip/settings.yaml", "pi", "pi", "400") # TODO encrypt
+  end
+end
+
+class Slideshow < Package
+  def initialize(servers)
+    super("slideshow",
+          dependencies: [
+            "lightdm",
+            "awesome",
+            "unclutter",
+            "davfs2",
+            "openjdk",
+          ])
+    @servers = servers
+  end
+  def install(registry, ctx)
+    install_dependencies(registry, ctx)
+
+    raise "Please link slideshow to project folder" unless File.exist?("slideshow")
+    raise "Please build slideshow" unless File.exist?("slideshow/build/libs/slideshow-all.jar")
+
+    changed = upload(ctx, "slideshow/build/libs/slideshow-all.jar", "/home/pi/slideshow-all.jar", "pi", "pi", "600")
+    if changed
+      exe(ctx, "touch /home/pi/slideshow-all.jar-updated")
+    end
+    upload_encrypted_file(ctx, "slideshow/src/deployment/.config/slideshow/#{ctx.host.hostname}.properties.gpg", "/home/pi/.config/slideshow/slideshow.properties", "pi", "pi", "600")
+    upload(ctx, "slideshow/src/deployment/.config/awesome/#{ctx.host.hostname}.rc.lua", "/home/pi/.config/awesome/rc.lua", "pi", "pi", "600")
+
+    MountService.new(ctx,
+                     "home-pi-Slideshow.mount",
+                     "slideshow/src/deployment/etc/systemd/system/home-pi-Slideshow.mount",
+                     @servers.with_role(:slideshow_server).in(ctx.host.properties.location).first.hostname)
+      .comment("Enter your credentials into /etc/davfs2/secret on #{ctx.host}. e.g. /home/pi/Slideshow \"username\" \"password\"")
+      .install
+
+    Service.new(ctx, "slideshow", "slideshow/src/deployment/.config/systemd/user/slideshow.service")
+      .install_for_user
+    Service.new(ctx, "slideshow-watcher.service", "slideshow/src/deployment/.config/systemd/user/slideshow-watcher.service")
+      .install_for_user(:skip_enable, :skip_restart)
+    Service.new(ctx, "slideshow-watcher.path", "slideshow/src/deployment/.config/systemd/user/slideshow-watcher.path")
+        .install_for_user
+  end
+end
+
+
+REGISTRY.add(Package.new("etckeeper"))
+  .add(Package.new("joe"))
+  .add(Package.new("emacs"))
+  .add(Package.new("apt-file",
+                   post_install_commands: ["apt-file update"]))
+  .add(Package.new("tig"))
+  .add(Package.new("byobu"))
+  .add(Package.new("fish"))
+  .add(Package.new("wavemon"))
+  .add(Package.new("lightdm"))
+  .add(Package.new("awesome"))
+  .add(Package.new("unclutter"))
+  .add(Package.new("davfs2"))
+  .add(Package.new("avahi-utils"))
+  .add(Package.new("syncthing",
+                   post_install_commands: ["systemctl --user enable syncthing", "systemctl --user start syncthing"]))
+  .add(Package.new("autoconf"))
+  .add(Package.new("libconfuse-dev"))
+  .add(Package.new("libgnutls28-dev"))
+  .add(Package.new("openvpn"))
+  .add(Package.new("apache2"))
+  .add(Package.new("aria2"))
+  .add(Slideshow.new(servers))
+  .add(Tarball.new("openjdk",
+                   "https://download.bell-sw.com/java/17.0.1+12/bellsoft-jdk17.0.1+12-linux-arm32-vfp-hflt.tar.gz",
+                   "/home/pi/bin/jdk",
+                   post_install_commands: [
+                     "mkdir -p ~/bin",
+                     'tar xvf #{file} --one-top-level=~/bin',
+                     "rm -f ~/bin/jdk",
+                     "ln -s ~/bin/jdk-17.0.1 ~/bin/jdk",
+                   ],
+                   test: "-L",
+                   ))
+  .add(Git.new("inadyn",
+               "https://github.com/troglobit/inadyn.git",
+               "/usr/local/sbin/inadyn",
+               dependencies: [
+                 "autoconf",
+                 "libconfuse-dev",
+                 "libgnutls28-dev",
+               ],
+               post_install_commands: [
+                 "cd inadyn && autoreconf -iv && ./configure --with-systemd=/etc/systemd/system && make -j && sudo make install",
+                 "sudo systemctl enable inadyn.service",
+                 "sudo systemctl start inadyn.service",
+               ],
+              ))
+  .add(ConfigFile.new("inadyn-config", "/usr/local/etc/inadyn.conf", 'inadyn.conf.gpg.#{location}', dependencies: ["inadyn"]))
+  .add(SDRip.new)
+  .add(AptDistUpgrade.new)
+
+
 
 class Array
   def with_role(role)
@@ -381,163 +515,85 @@ class Service
   end
 end
 
-locations =
-  [
-    :munich,
-    :seehaus,
-    :cloud,
-  ]
 
-locations.each do |location|
-  namespace location do
-    desc "Run all in #{location}"
-    all = task :all do
-    end
-
-    desc "Configure torrent servers for #{location}"
-    t = task :torrent do
-      on servers.with_role(:torrent).in(location) do |host|
-        info("Installing openvpn + deluge in namespace on #{host}")
-
-        torrent_packages.each do |p|
-          install_apt(self, p)
-        end
-        install_from_web(self, "https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn", "/usr/local/bin/namespaced-openvpn")
-        info("Installing custom openvpn config and scripts on #{host}")
-        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/pia.pass.gpg", "/etc/openvpn/client/pia.pass", "root", "root", "400", :sudo)
-        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/italy.conf.gpg", "/etc/openvpn/client/italy.conf", "root", "root", "400", :sudo)
-        Service.new(self, "openvpn-in-namespace-client@italy", "torrent/openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service")
-          .install
-        upload(self, "torrent/000-default.conf", "/etc/apache2/sites-available/000-default.conf", "root", "root", "644", :sudo)
-        exe(self, "a2enmod dav", :sudo)
-        exe(self, "a2enmod dav_fs", :sudo)
-        exe(self, "systemctl restart apache2", :sudo)
-      end
-    end
-    all.enhance([t])
-
-    desc "Configure for sdrip at #{location}"
-    t = task :sdrip do
-      on servers.with_role(:sdrip).in(location) do |host|
-        info("Install sdrip")
-
-        raise "Please link sdrip project folder" unless File.exist?("sdrip")
-        raise "Please compile sdrip" unless File.exist?("sdrip/out/main/raspi/sdrip")
-
-        Service.new(self, "sdrip", "sdrip/source/deployment/systemd/sdrip.service")
-          .install_for_user
-        Dir.glob("sdrip/public/*").each do |file|
-          upload(self, file, "/home/pi/#{file}", "pi", "pi", "400")
-        end
-        upload(self, "sdrip/out/main/raspi/sdrip", "/home/pi/sdrip/sdrip", "pi", "pi", "700")
-        upload(self, "sdrip/source/deployment/sites/#{host.hostname}/settings.yaml", "/home/pi/sdrip/settings.yaml", "pi", "pi", "400") # TODO encrypt
-      end
-    end
-    all.enhance([t])
-
-    def update(ctx, host)
-      info("Updating #{host}")
-      exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes update", :sudo)
-      exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes dist-upgrade", :sudo)
-      exe(ctx, "DEBIAN_FRONTEND=noninteractive apt-get --yes autoremove", :sudo)
-    end
-    desc "Update apt based servers"
-    t = task :update do
-      on servers.with_role(:apt).in(location) do |host|
-        update(self, host)
-      end
-    end
-    all.enhance([t])
-
-    namespace :update do
-    servers.with_role(:apt).each do |host|
-      desc "Update apt based server #{host}"
-      task "#{host.hostname}" do
-        on host do
-          update(self, host)
-        end
-      end
-    end
-    end
-
-    def install(ctx, host)
-      if host.properties.packages
-        info("Installing #{host.properties.packages.join(' ')} on #{host}")
-        host.properties.packages.each do |p|
-          p.install(ctx)
-        end
-      end
-    end
-    desc "Install all packages"
-    t = task :install_packages do
-      on servers.with_role(:apt).in(location) do |host|
-        install(self, host)
-      end
-    end
-    all.enhance([t])
-
-    namespace :install do
-      servers.with_role(:apt).each do |host|
-        desc "Install all packages on #{host}"
-        task "#{host.hostname}" do
-          on host do
-            install(self, host)
-          end
-        end
-      end
-    end
-
-    desc "Check state"
-    t = task :check do
-      on servers.with_role(:pi).in(location) do |host|
-        exe(self, "/usr/bin/vcgencmd get_throttled") # https://raspberrypi.stackexchange.com/questions/60593/how-raspbian-detects-under-voltage
-        exe(self, "cat /proc/device-tree/model")
-      end
-    end
-    all.enhance([t])
-  end
-
-end
+#locations.each do |location|
+#  namespace location do
+#    desc "Run all in #{location}"
+#    all = task :all do
+#    end
+#
+#    desc "Configure torrent servers for #{location}"
+#    t = task :torrent do
+#      on servers.with_role(:torrent).in(location) do |host|
+#        info("Installing openvpn + deluge in namespace on #{host}")
+#
+#        torrent_packages.each do |p|
+#          install_apt(self, p)
+#        end
+#        install_from_web(self, "https://raw.githubusercontent.com/slingamn/namespaced-openvpn/master/namespaced-openvpn", "/usr/local/bin/namespaced-openvpn")
+#        info("Installing custom openvpn config and scripts on #{host}")
+#        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/pia.pass.gpg", "/etc/openvpn/client/pia.pass", "root", "root", "400", :sudo)
+#        upload_encrypted_file(self, "torrent/openvpn-in-namespace-client@italy/italy.conf.gpg", "/etc/openvpn/client/italy.conf", "root", "root", "400", :sudo)
+#        Service.new(self, "openvpn-in-namespace-client@italy", "torrent/openvpn-in-namespace-client@italy/openvpn-in-namespace-client@.service")
+#          .install
+#        upload(self, "torrent/000-default.conf", "/etc/apache2/sites-available/000-default.conf", "root", "root", "644", :sudo)
+#        exe(self, "a2enmod dav", :sudo)
+#        exe(self, "a2enmod dav_fs", :sudo)
+#        exe(self, "systemctl restart apache2", :sudo)
+#      end
+#    end
+#    all.enhance([t])
+#
+#    def install(ctx, host)
+#      if host.properties.packages
+#        info("Installing #{host.properties.packages.join(' ')} on #{host}")
+#        host.properties.packages.each do |p|
+#          p.install(ctx)
+#        end
+#      end
+#    end
+#    desc "Install all packages"
+#    t = task :install_packages do
+#      on servers.with_role(:apt).in(location) do |host|
+#        install(self, host)
+#      end
+#    end
+#    all.enhance([t])
+#
+#    namespace :install do
+#      servers.with_role(:apt).each do |host|
+#        desc "Install all packages on #{host}"
+#        task "#{host.hostname}" do
+#          on host do
+#            install(self, host)
+#          end
+#        end
+#      end
+#    end
+#
+#    desc "Check state"
+#    t = task :check do
+#      on servers.with_role(:pi).in(location) do |host|
+#        exe(self, "/usr/bin/vcgencmd get_throttled") # https://raspberrypi.stackexchange.com/questions/60593/how-raspbian-detects-under-voltage
+#        exe(self, "cat /proc/device-tree/model")
+#      end
+#    end
+#    all.enhance([t])
+#  end
+#
+#end
 
 
-servers.with_role(:slideshow).each do |host|
-  desc "Install slideshow on host #{host.hostname}"
-  task "install-slideshow-#{host.hostname}" do
-    on host do
-      info("Install slideshow")
-      raise "Please link slideshow to project folder" unless File.exist?("slideshow")
-      raise "Please build slideshow" unless File.exist?("slideshow/build/libs/slideshow-all.jar")
-
-      changed = upload(self, "slideshow/build/libs/slideshow-all.jar", "/home/pi/slideshow-all.jar", "pi", "pi", "600")
-      if changed
-        exe(self, "touch /home/pi/slideshow-all.jar-updated")
-      end
-      upload_encrypted_file(self, "slideshow/src/deployment/.config/slideshow/#{host.hostname}.properties.gpg", "/home/pi/.config/slideshow/slideshow.properties", "pi", "pi", "600")
-      upload(self, "slideshow/src/deployment/.config/awesome/#{host.hostname}.rc.lua", "/home/pi/.config/awesome/rc.lua", "pi", "pi", "600")
-
-      MountService.new(self, "home-pi-Slideshow.mount", "slideshow/src/deployment/etc/systemd/system/home-pi-Slideshow.mount",
-                       servers.with_role(:slideshow_server).in(host.properties.location).first.hostname)
-        .comment("Enter your credentials into /etc/davfs2/secret on #{host}. e.g. /home/pi/Slideshow \"username\" \"password\"")
-        .install
-      Service.new(self, "slideshow", "slideshow/src/deployment/.config/systemd/user/slideshow.service")
-        .install_for_user
-      Service.new(self, "slideshow-watcher.service", "slideshow/src/deployment/.config/systemd/user/slideshow-watcher.service")
-        .install_for_user(:skip_enable, :skip_restart)
-      Service.new(self, "slideshow-watcher.path", "slideshow/src/deployment/.config/systemd/user/slideshow-watcher.path")
-        .install_for_user
-    end
-  end
-end
 
 
 servers.each do |server|
   namespace server.hostname do
-    desc "Install packages"
-    task :install_packages do
+    desc "Install"
+    task :install do
       on server do
         ctx = self
         server.properties.packages.each do |p|
-          p.install(ctx)
+          REGISTRY.install(ctx, p)
         end
       end
     end
@@ -545,6 +601,5 @@ servers.each do |server|
 
 end
 
-
-
 task :default
+
