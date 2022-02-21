@@ -13,6 +13,7 @@ def server(host_name, roles, location, hash = {})
   hash.each_pair do |key, value|
     result.properties[key] = value
   end
+  result.properties.packages = roles_to_packages(roles)
   return result
 end
 
@@ -26,6 +27,7 @@ end
 
 def debian_packages
   return [
+    "apt-dist-upgrade",
     "etckeeper",
     "joe",
     "emacs",
@@ -54,38 +56,35 @@ def slideshow_server_packages
   ]
 end
 
+def no_ip_packages
+  return [
+    "inadyn-config",
+  ]
+end
+
+def sdrip_packages
+  return [
+    "sdrip",
+  ]
+end
+
+def roles_to_packages(roles)
+  return roles.map { |role, res|
+    begin
+      send(role.to_s + "_packages")
+    rescue
+      nil
+    end
+  }.flatten.compact
+end
+
 servers = [
-  server("fs.local", [:torrent, :apt, :pi, :slideshow_server, :no_ip], :munich, {
-           packages: debian_packages +
-             slideshow_server_packages +
-             ["inadyn-config"]
-         }),
-  server("slideshow.local", [:slideshow, :apt, :pi, :wifi], :munich, {
-           packages: debian_packages +
-             wifi_packages +
-             slideshow_packages,
-         }),
-  server("seehaus-piano.local", [:torrent, :apt, :sdrip, :pi, :wifi, :slideshow_server, :no_ip], :seehausen, {
-           packages:
-             ["apt-dist-upgrade"] +
-             debian_packages +
-             torrent_packages +
-             wifi_packages +
-             [
-               "inadyn-config",
-               "sdrip",
-             ] +
-             slideshow_server_packages
-         }),
-  server("seehaus-blau.local", [:pi, :apt, :wifi, :slideshow], :seehausen, {
-           packages: debian_packages +
-             wifi_packages +
-             slideshow_packages,
-         }),
-  server("gizmomogwai-cloud001", [:apt], :cloud),
+  server("fs.local", [:debian, :torrent, :pi, :slideshow_server, :no_ip], :munich),
+  server("slideshow.local", [:debian, :slideshow, :pi, :wifi], :munich),
+  server("seehaus-piano.local", [:debian, :torrent, :no_ip, :sdrip, :pi, :wifi, :slideshow_server], :seehausen),
+  server("seehaus-blau.local", [:debian, :pi, :wifi, :slideshow], :seehausen),
+  server("gizmomogwai-cloud001", [:debian], :cloud),
 ]
-
-
 
 class Registry
   attr_reader :packages
@@ -515,13 +514,6 @@ class Service
   end
 end
 
-
-#locations.each do |location|
-#  namespace location do
-#    desc "Run all in #{location}"
-#    all = task :all do
-#    end
-#
 #    desc "Configure torrent servers for #{location}"
 #    t = task :torrent do
 #      on servers.with_role(:torrent).in(location) do |host|
@@ -542,34 +534,6 @@ end
 #        exe(self, "systemctl restart apache2", :sudo)
 #      end
 #    end
-#    all.enhance([t])
-#
-#    def install(ctx, host)
-#      if host.properties.packages
-#        info("Installing #{host.properties.packages.join(' ')} on #{host}")
-#        host.properties.packages.each do |p|
-#          p.install(ctx)
-#        end
-#      end
-#    end
-#    desc "Install all packages"
-#    t = task :install_packages do
-#      on servers.with_role(:apt).in(location) do |host|
-#        install(self, host)
-#      end
-#    end
-#    all.enhance([t])
-#
-#    namespace :install do
-#      servers.with_role(:apt).each do |host|
-#        desc "Install all packages on #{host}"
-#        task "#{host.hostname}" do
-#          on host do
-#            install(self, host)
-#          end
-#        end
-#      end
-#    end
 #
 #    desc "Check state"
 #    t = task :check do
@@ -580,11 +544,6 @@ end
 #    end
 #    all.enhance([t])
 #  end
-#
-#end
-
-
-
 
 servers.each do |server|
   namespace server.hostname do
